@@ -297,6 +297,64 @@ func (c *OneHuxClient) GetUserinfo(accessToken string) (map[string]interface{}, 
 	return claims, nil
 }
 
+// PublicApplication is one entry from GET {APIBaseURL}/api/v1/organizations/{orgSlug}/
+// public-applications/ — deliberately only Name/LogoURL/HomeURL, matching exactly what that
+// endpoint returns. No ClientID, no slug, no OAuth-relevant identifier: a pure "what can I
+// launch" list, not a way to start a sign-in flow.
+type PublicApplication struct {
+	Name    string
+	LogoURL string
+	HomeURL string
+}
+
+// GetPublicApplications calls GET {APIBaseURL}/api/v1/organizations/{orgSlug}/
+// public-applications/ — the platform's public, unauthenticated application-launcher endpoint
+// (README.md ADR-078). No ClientID/ClientSecret involved: this is a public, unauthenticated
+// GET, usable for any Organization by its own slug, not just this client's own configured one.
+// Returns *OrganizationNotFoundError if orgSlug doesn't match a usable Organization.
+func (c *OneHuxClient) GetPublicApplications(orgSlug string) ([]PublicApplication, error) {
+	req, err := http.NewRequest(http.MethodGet, c.APIBaseURL+"/api/v1/organizations/"+url.PathEscape(orgSlug)+"/public-applications/", nil)
+	if err != nil {
+		return nil, fmt.Errorf("onehuxsso: failed to build public-applications request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, &OrganizationNotFoundError{ErrorDescription: "Could not reach OneHux: " + err.Error()}
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("onehuxsso: failed to read public-applications response: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var parsed map[string]interface{}
+		_ = json.Unmarshal(respBody, &parsed)
+		errDesc, _ := parsed["error_description"].(string)
+		if errDesc == "" {
+			errDesc = "Organization not found."
+		}
+		return nil, &OrganizationNotFoundError{ErrorDescription: errDesc}
+	}
+
+	var items []struct {
+		Name    string `json:"name"`
+		LogoURL string `json:"logo_url"`
+		HomeURL string `json:"home_url"`
+	}
+	if err := json.Unmarshal(respBody, &items); err != nil {
+		return nil, fmt.Errorf("onehuxsso: failed to decode public-applications response: %w", err)
+	}
+
+	applications := make([]PublicApplication, 0, len(items))
+	for _, item := range items {
+		applications = append(applications, PublicApplication{Name: item.Name, LogoURL: item.LogoURL, HomeURL: item.HomeURL})
+	}
+	return applications, nil
+}
+
 // BuildLogoutURL builds the RP-initiated logout redirect (README.md ADR-070, backend repo):
 // PostLogoutRedirectURI must already be registered in this Application's own redirect_uris
 // list — the same list the login callback uses, not a separate one — or the platform rejects

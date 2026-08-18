@@ -43,6 +43,15 @@ type StepUpRequiredError struct {
 
 func (e *StepUpRequiredError) Error() string { return e.ErrorDescription }
 
+// OrganizationNotFoundError: GET /api/v1/organizations/{orgSlug}/public-applications/ returned
+// a non-2xx response — no Organization matches that slug, or it isn't usable (deactivated/
+// deleted). Carries the real error description from the backend rather than a generic message.
+type OrganizationNotFoundError struct {
+	ErrorDescription string
+}
+
+func (e *OrganizationNotFoundError) Error() string { return e.ErrorDescription }
+
 // TokenExpiredError: GET /api/v1/oauth/userinfo/ rejected the access token.
 //
 // OneHux Accounts does not currently issue a refresh token (access tokens are a 15-minute,

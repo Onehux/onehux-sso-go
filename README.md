@@ -104,6 +104,29 @@ claims, err := client.GetUserinfo(tokens.AccessToken)
 logoutURL := client.BuildLogoutURL("")
 ```
 
+## Public application launcher
+
+`GET /api/v1/organizations/{orgSlug}/public-applications/` is a real, public, unauthenticated
+platform endpoint — no `ClientID`/`ClientSecret` involved, usable for any Organization by its own
+slug, not just your own configured one. It returns only `Name`/`LogoURL`/`HomeURL` for
+Applications that Organization has opted into public listing — a pure "what can I launch" list,
+never a way to start a sign-in flow.
+
+```go
+apps, err := client.GetPublicApplications("onehux")
+// [{Name: "ODS", LogoURL: "https://...", HomeURL: "https://..."}]
+```
+
+Rendering is entirely up to you — this package ships the data method only, no UI component (Go
+has no standard templating/UI convention to build one against). A plain, unstyled illustration
+(adapt this to your own design, don't copy it as-is):
+
+```gotemplate
+{{range .Applications}}
+  <a href="{{.HomeURL}}"><img src="{{.LogoURL}}" alt="{{.Name}}">{{.Name}}</a>
+{{end}}
+```
+
 ## Logging out — what the user actually sees
 
 There are two different triggers, and — once you wire up back-channel logout (below) — they

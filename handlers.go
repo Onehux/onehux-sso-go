@@ -110,9 +110,22 @@ func (h *Handlers) LoginHandler(w http.ResponseWriter, r *http.Request) {
 // access token in the session, redirects to LoginSuccessRedirect. Also indexes the session by
 // the id_token's `sid` claim (OIDC Back-Channel Logout — optional feature, see
 // BackchannelLogoutHandler).
+//
+// On a step_up_required response specifically (README.md ADR-076, backend repo), this redirects
+// the browser to complete step-up rather than failing — the pending PKCE state/verifier is
+// deliberately NOT deleted from the session in that one case, since the browser will land back
+// on this exact handler shortly with a brand-new code for the same state. Every other outcome
+// (success, *InvalidStateError, any other *TokenExchangeError) deletes it exactly as before —
+// this is a narrow, additive branch, not a change to the general discard behavior.
 func (h *Handlers) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	if errParam := query.Get("error"); errParam != "" {
+		id, values, err := h.store.Get(w, r)
+		if err == nil {
+			delete(values, stateSessionKey)
+			delete(values, verifierSessionKey)
+			_ = h.store.Save(id, values)
+		}
 		http.Error(w, "Sign-in failed: "+errParam+" — "+query.Get("error_description"), http.StatusBadRequest)
 		return
 	}
@@ -122,19 +135,33 @@ func (h *Handlers) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Peeked, not deleted here: the *StepUpRequiredError branch below needs these to still be
+	// in the session if it fires. Every other branch deletes them explicitly before returning.
 	expectedState := values[stateSessionKey]
 	codeVerifier := values[verifierSessionKey]
-	delete(values, stateSessionKey)
-	delete(values, verifierSessionKey)
+	state := query.Get("state")
 
-	tokens, err := h.client.ExchangeCode(query.Get("code"), query.Get("state"), expectedState, codeVerifier)
+	tokens, err := h.client.ExchangeCode(query.Get("code"), state, expectedState, codeVerifier)
 	if err != nil {
 		var invalidState *InvalidStateError
+		var stepUp *StepUpRequiredError
 		var exchangeErr *TokenExchangeError
 		switch {
 		case errors.As(err, &invalidState):
+			delete(values, stateSessionKey)
+			delete(values, verifierSessionKey)
+			_ = h.store.Save(id, values)
 			http.Error(w, invalidState.Message, http.StatusBadRequest)
+		case errors.As(err, &stepUp):
+			if codeVerifier == "" || state == "" {
+				http.Error(w, "step_up_required with no pending PKCE state to resume.", http.StatusBadRequest)
+				return
+			}
+			http.Redirect(w, r, h.client.BuildStepUpRedirectURL(codeVerifier, state), http.StatusFound)
 		case errors.As(err, &exchangeErr):
+			delete(values, stateSessionKey)
+			delete(values, verifierSessionKey)
+			_ = h.store.Save(id, values)
 			http.Error(w, exchangeErr.OAuthError+": "+exchangeErr.ErrorDescription, http.StatusBadRequest)
 		default:
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -142,6 +169,8 @@ func (h *Handlers) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	delete(values, stateSessionKey)
+	delete(values, verifierSessionKey)
 	values[h.sessionAccessTokenKey] = tokens.AccessToken
 
 	// OIDC Back-Channel Logout (optional): index this session by the OneHux Session id (`sid`)

@@ -206,10 +206,17 @@ func (c *OneHuxClient) ExchangeCode(code, state, expectedState, codeVerifier str
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		oauthErr, _ := parsed["error"].(string)
+		errDesc, _ := parsed["error_description"].(string)
+		if oauthErr == "step_up_required" {
+			// Deliberately distinct from TokenExchangeError: this is a recoverable, expected
+			// mid-login prompt (device/location trust gate), not a failed exchange — the caller
+			// (CallbackHandler) redirects the browser to complete step-up rather than showing
+			// an error.
+			return nil, &StepUpRequiredError{ErrorDescription: errDesc}
+		}
 		if oauthErr == "" {
 			oauthErr = "unknown_error"
 		}
-		errDesc, _ := parsed["error_description"].(string)
 		return nil, &TokenExchangeError{OAuthError: oauthErr, ErrorDescription: errDesc, StatusCode: resp.StatusCode}
 	}
 
@@ -229,6 +236,32 @@ func (c *OneHuxClient) ExchangeCode(code, state, expectedState, codeVerifier str
 		ExpiresIn:   expiresIn,
 		Scope:       scope,
 	}, nil
+}
+
+// BuildStepUpRedirectURL builds the redirect used when ExchangeCode returns
+// *StepUpRequiredError (README.md ADR-076, backend repo). Reuses this SAME pending
+// authorization's ClientID/RedirectURI/Scope/state, and re-derives code_challenge from the
+// already-stored codeVerifier (PKCE code_challenge is a pure function of code_verifier, so
+// nothing extra needs to be persisted). Deep-links straight to the real hosted email-OTP
+// step-up page — the exact same URL the platform's own first-party dashboard redirects to for
+// this identical error (backend repo: frontend/src/lib/server/step-up.ts) — rather than the
+// generic /login page, since the platform requires a step-up-caliber method specifically here.
+// The caller MUST NOT discard the pending codeVerifier/state before calling this: the browser
+// will land back on this same app's callback shortly with a brand-new code for this same
+// state, and CallbackHandler needs the still-stored codeVerifier to exchange it.
+func (c *OneHuxClient) BuildStepUpRedirectURL(codeVerifier, state string) string {
+	challengeSum := sha256.Sum256([]byte(codeVerifier))
+	codeChallenge := base64URLEncode(challengeSum[:])
+	query := url.Values{
+		"client_id":             {c.ClientID},
+		"redirect_uri":          {c.RedirectURI},
+		"code_challenge":        {codeChallenge},
+		"code_challenge_method": {"S256"},
+		"scope":                 {c.Scope},
+		"state":                 {state},
+		"reason":                {"step_up"},
+	}
+	return fmt.Sprintf("%s/login/email-otp?%s", c.LoginBaseURL, query.Encode())
 }
 
 // GetUserinfo calls GET {APIBaseURL}/api/v1/oauth/userinfo/ — real claims (sub, name, email,

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 
-	onehuxsso "github.com/onehux/onehux-sso-go"
+	onehuxsso "github.com/Onehux/onehux-sso-go"
 )
 
 const port = "4184"

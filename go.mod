@@ -1,3 +1,3 @@
-module github.com/onehux/onehux-sso-go
+module github.com/Onehux/onehux-sso-go
 
-go 1.25.5
+go 1.26

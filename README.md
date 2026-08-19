@@ -20,11 +20,8 @@ Zero non-stdlib dependencies.
 ## Install
 
 ```bash
-go get github.com/onehux/onehux-sso-go
+go get github.com/Onehux/onehux-sso-go
 ```
-
-(Not yet published to a public module proxy — until that's decided, add a `replace` directive
-in your own `go.mod` pointing at a local path or this repo directly.)
 
 ## Two hosts — don't mix them up
 
@@ -53,7 +50,7 @@ the backend repo's `README.md`, ADR-070) — the wrong host doesn't error loudly
        "net/http"
        "os"
 
-       onehuxsso "github.com/onehux/onehux-sso-go"
+       onehuxsso "github.com/Onehux/onehux-sso-go"
    )
 
    func main() {
@@ -214,5 +211,4 @@ go vet ./...
 
 ## License
 
-MIT — see `LICENSE`. (License choice not yet finalized for public distribution — see the
-publish-readiness pass this repo's own tracking notes reference.)
+Apache License 2.0 — see `LICENSE`.

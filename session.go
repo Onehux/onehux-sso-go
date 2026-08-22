@@ -34,6 +34,19 @@ type SessionStore interface {
 
 const sessionCookieName = "onehux_sso_session"
 
+// sessionCookieLifetime is how long MemorySessionStore's own cookie is valid for.
+//
+// This is deliberately NOT tied to the 15-minute access-token lifetime: the cookie only carries
+// an opaque local session id, never the token itself, and UserinfoHandler (and any caller of
+// OneHuxClient.GetUserinfo) already treats a *TokenExpiredError from a stale-but-present token as
+// the normal, expected case — it returns 401, not a crash, so the local session cookie safely
+// outliving one token is fine as long as that safety net actually fires. What was wrong before
+// was 30 days: a cookie that implies weeks of validity for a credential that dies in 15 minutes
+// was misleading operationally (support tickets, security review, cookie-lifetime audits) even
+// though it wasn't itself the source of stale-token bugs. 24 hours matches a normal single-day
+// browser session without pretending the underlying token is anywhere near that fresh.
+const sessionCookieLifetime = 24 * time.Hour
+
 // MemorySessionStore is a real, working, in-process SessionStore — correct for the example app
 // and any genuinely single-process deployment. Session ids are cryptographically random and
 // carried in an HttpOnly cookie; nothing but the opaque id ever reaches the browser.
@@ -84,7 +97,7 @@ func (s *MemorySessionStore) Get(w http.ResponseWriter, r *http.Request) (string
 		HttpOnly: true,
 		Secure:   s.secure,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(30 * 24 * time.Hour),
+		Expires:  time.Now().Add(sessionCookieLifetime),
 	})
 	return id, values, nil
 }
